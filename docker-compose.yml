@@ -1,0 +1,21 @@
+version: '3.8'
+
+services:
+  app:
+    container_name: api-cache-firestore
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"  # Mapeia a porta do container para a máquina host
+    volumes:
+      - .:/app  # Monta o diretório atual no container (opcional)
+    environment:
+      GOOGLE_APPLICATION_CREDENTIALS: "/app/credenciais.json"
+    restart: always
+    networks:
+      - my_network
+
+networks:
+  my_network:
+    external: true
