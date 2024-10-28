@@ -1,4 +1,3 @@
-# api_service.py
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import Dict, Optional
@@ -6,6 +5,8 @@ from datetime import datetime, timedelta
 from firebase_admin import credentials, firestore, initialize_app
 from google.cloud.firestore_v1 import FieldFilter
 import firebase_admin
+from google.oauth2 import service_account
+from google.cloud import firestore
 
 app = FastAPI()
 
@@ -26,13 +27,10 @@ class CacheData(BaseModel):
     last_update: datetime
 
 def initialize_firestore_client(cred_data):
-    if not firebase_admin._apps:
-        cred = credentials.Certificate(cred_data)
-        app = initialize_app(cred)
-    else:
-        app = firebase_admin.get_app()
-    
-    return firestore.client(app)
+    # Cria credenciais específicas para cada barbearia
+    credentials = service_account.Credentials.from_service_account_info(cred_data)
+    client = firestore.Client(credentials=credentials, project=cred_data["project_id"])
+    return client
 
 def get_all_collaborator_ids(db):
     collaborator_ids = []
@@ -44,9 +42,10 @@ def get_all_collaborator_ids(db):
     
     return collaborator_ids
 
-def save_cache_to_firestore(db, cache_data):
+def save_cache_to_firestore(db, flet_path):
     # Verifica se todos os IDs de colaboradores estão presentes no cache
     all_collaborator_ids = get_all_collaborator_ids(db)
+    cache_data = caches.get(flet_path, {})
     
     for colaborador_id in all_collaborator_ids:
         if colaborador_id not in cache_data:
@@ -62,7 +61,6 @@ def save_cache_to_firestore(db, cache_data):
     cache_ref.set(cache_data)
 
 def load_cache_from_firestore(db, flet_path):
-    global caches
     cache_ref = db.collection("cache").document("revenue_cache")
     cache_doc = cache_ref.get()
     if cache_doc.exists:
@@ -132,23 +130,6 @@ def calculate_weekly_revenue(db):
     return weekly_revenue
 
 def on_transaction_update(doc_snapshot, changes, read_time, flet_path, db):
-    # cache = load_cache_from_firestore(db, flet_path)
-    # print(f"Alteração detectada no Firestore para {flet_path}.")
-
-    # daily_revenue = calculate_daily_revenue(db)
-    # weekly_revenue = calculate_weekly_revenue(db)
-    
-    # for colaborador_id in weekly_revenue:
-    #     cache[colaborador_id] = {
-    #         "daily_revenue": daily_revenue[colaborador_id]["total_value"],
-    #         "daily_transactions": daily_revenue[colaborador_id]["total_transactions"],
-    #         "weekly_revenue": weekly_revenue.get(colaborador_id, {"total_value": 0})["total_value"],
-    #         "weekly_transactions": weekly_revenue.get(colaborador_id, {"total_transactions": 0})["total_transactions"],
-    #         "last_update": datetime.now()
-    #     }
-
-    # save_cache_to_firestore(db, cache)
-
     cache = load_cache_from_firestore(db, flet_path)
     print(f"Alteração detectada no Firestore para {flet_path}.")
 
@@ -167,6 +148,8 @@ def on_transaction_update(doc_snapshot, changes, read_time, flet_path, db):
             "last_update": datetime.now()
         }
 
+    caches[flet_path] = cache
+    save_cache_to_firestore(db, flet_path)
 
 def start_transaction_listener(flet_path, db):
     now = datetime.now()
@@ -179,12 +162,28 @@ def start_transaction_listener(flet_path, db):
 
 @app.post("/register")
 def register_barbearia(barbearia: RegisterBarbearia):
+    # if barbearia.flet_path in clients:
+    #     raise HTTPException(status_code=400, detail="Barbearia já registrada.")
+
+    # db = initialize_firestore_client(barbearia.cred)
+    
+    # # Armazena o cliente Firestore
+    # clients[barbearia.flet_path] = db
+    
+    # # Carrega o cache inicial do Firestore para esta barbearia
+    # load_cache_from_firestore(db, barbearia.flet_path)
+
+    # # Inicia o listener para esta barbearia
+    # start_transaction_listener(barbearia.flet_path, db)
+    
+    # return {"status": f"Barbearia {barbearia.flet_path} registrada com sucesso."}
     if barbearia.flet_path in clients:
         raise HTTPException(status_code=400, detail="Barbearia já registrada.")
 
+    # Inicializa uma instância de Firestore independente para cada barbearia
     db = initialize_firestore_client(barbearia.cred)
     
-    # Armazena o cliente Firestore
+    # Armazena o cliente Firestore específico para esta barbearia
     clients[barbearia.flet_path] = db
     
     # Carrega o cache inicial do Firestore para esta barbearia
@@ -248,7 +247,8 @@ def get_revenue_from_cache(flet_path: str, colaborador_id: str):
                 "last_update": datetime.now()
             }
 
-        save_cache_to_firestore(db, cache)
+        caches[flet_path] = cache
+        save_cache_to_firestore(db, flet_path)
     
     colaborador_cache = cache.get(colaborador_id, {})
     return (
@@ -257,4 +257,3 @@ def get_revenue_from_cache(flet_path: str, colaborador_id: str):
         colaborador_cache.get("daily_transactions", 0),
         colaborador_cache.get("weekly_transactions", 0)
     )
-
