@@ -7,6 +7,10 @@ from google.cloud.firestore_v1 import FieldFilter
 import firebase_admin
 from google.oauth2 import service_account
 from google.cloud import firestore
+import logging
+
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
 
 app = FastAPI()
 
@@ -82,6 +86,7 @@ def calculate_daily_revenue(db):
     daily_revenue = {}
 
     for transaction in transactions:
+        logger.debug('calculate_daily_revenue', transaction.id, transaction.to_dict())
         data = transaction.to_dict()
         colaborador_id = data['colaborador_id']
         total = data['total']
@@ -115,6 +120,7 @@ def calculate_weekly_revenue(db):
         transactions = query.stream()
 
         for transaction in transactions:
+            logger.debug('calculate_weekly_revenue', transaction.id, transaction.to_dict())
             data = transaction.to_dict()
             colaborador_id = data['colaborador_id']
             total = data['total']
@@ -131,7 +137,7 @@ def calculate_weekly_revenue(db):
 
 def on_transaction_update(doc_snapshot, changes, read_time, flet_path, db):
     cache = load_cache_from_firestore(db, flet_path)
-    print(f"Alteração detectada no Firestore para {flet_path}.")
+    logger.debug(f"Alteração detectada no Firestore para {flet_path}.")
 
     daily_revenue = calculate_daily_revenue(db)
     weekly_revenue = calculate_weekly_revenue(db)
@@ -226,15 +232,15 @@ def get_revenue_from_cache(flet_path: str, colaborador_id: str):
     colaborador_cache = cache.get(colaborador_id, {})
     data = colaborador_cache.get('last_update', "nenhum dado")
     data_formatada = data.strftime('%d-%m-%Y')
-    print(data)
-    print(colaborador_cache)
-    print(data_formatada)
+    logger.debug(data)
+    logger.debug(colaborador_cache)
+    logger.debug(data_formatada)
 
     data_atual_formatada = datetime.now().strftime('%d-%m-%Y')
-    print(data_atual_formatada)
+    logger.debug(data_atual_formatada)
 
     if data_atual_formatada != data_formatada:
-        print("Oi")
+        logger.debug("Oi")
         daily_revenue = calculate_daily_revenue(db)
         weekly_revenue = calculate_weekly_revenue(db)
         
@@ -257,3 +263,11 @@ def get_revenue_from_cache(flet_path: str, colaborador_id: str):
         colaborador_cache.get("daily_transactions", 0),
         colaborador_cache.get("weekly_transactions", 0)
     )
+
+@app.get("/debug_clients")
+def debug_clients():
+    return {"clientes": list(clients.keys())}
+
+# if __name__ == "__main__":
+#     import uvicorn
+#     uvicorn.run("api_service:app", host="0.0.0.0", port=8000, reload=True, log_level="debug")
